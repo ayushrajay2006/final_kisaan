@@ -3,6 +3,7 @@
 
 from fastapi import FastAPI, HTTPException, File, UploadFile
 from pydantic import BaseModel
+from typing import Optional
 
 # Import functions from all our agents
 from orchestrator import listen_and_transcribe, recognize_intent
@@ -15,21 +16,20 @@ from sky_watcher import get_weather_forecast
 try:
     import speech_recognition as sr
     sr.Microphone()
-except ImportError:
-    print("PyAudio is not installed. Please install it with 'pip install PyAudio'")
-except OSError:
-    print("\n--- MICROPHONE NOT FOUND ---\nThis application requires a microphone.\nPlease ensure a microphone is connected and configured.\n")
+except (ImportError, OSError):
+    print("\n--- MICROPHONE NOT FOUND or PyAudio not installed ---\n")
 # --- End of Pre-flight Check ---
 
 
 app = FastAPI(
     title="AI Farmer Assistant API",
     description="An AI-powered assistant to help farmers with pricing, crop diseases, and government schemes.",
-    version="1.2.0", # Version bump for final fix
+    version="1.3.0", # Version bump for location feature
 )
 
 class ListenRequest(BaseModel):
     language_code: str = "en-IN"
+    location: Optional[str] = None # Location is now an optional field
 
 @app.get("/")
 def read_root():
@@ -52,7 +52,10 @@ def handle_listen_and_understand(request: ListenRequest):
     elif intent == "Scheme_Information":
         agent_response = get_scheme_information(transcribed_text)
     elif intent == "Weather_Forecast":
-        agent_response = get_weather_forecast(transcribed_text)
+        if not request.location:
+            agent_response = {"status": "error", "message": "Please enter a location to get a weather forecast."}
+        else:
+            agent_response = get_weather_forecast(location=request.location)
     elif intent == "Crop_Health_Diagnosis":
         agent_response = {"status": "info", "message": "Please use the 'Crop Disease Diagnosis' section to upload an image."}
     else:
