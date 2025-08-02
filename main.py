@@ -1,5 +1,5 @@
 # main.py
-# This version adds print statements to the main delegation logic to solve the final bug.
+# FINAL CLEANED VERSION
 
 from fastapi import FastAPI, HTTPException, File, UploadFile
 from pydantic import BaseModel
@@ -11,7 +11,7 @@ from digital_pathologist import diagnose_crop_health
 from policy_advisor import get_scheme_information
 from sky_watcher import get_weather_forecast
 
-# --- Pre-flight Check for Microphone (Unchanged) ---
+# --- Pre-flight Check for Microphone ---
 try:
     import speech_recognition as sr
     sr.Microphone()
@@ -25,7 +25,7 @@ except OSError:
 app = FastAPI(
     title="AI Farmer Assistant API",
     description="An AI-powered assistant to help farmers with pricing, crop diseases, and government schemes.",
-    version="0.6.1", # Version bump for debugging!
+    version="1.2.0", # Version bump for final fix
 )
 
 class ListenRequest(BaseModel):
@@ -38,45 +38,26 @@ def read_root():
 
 @app.post("/listen_and_understand")
 def handle_listen_and_understand(request: ListenRequest):
-    """
-    Handles the voice-based interaction workflow.
-    """
-    print("\n--- New Request Received ---") # <<< DEBUG PRINT
-    
-    # Step 1: Listen and Transcribe
     transcription_result = listen_and_transcribe(language_code=request.language_code)
     if transcription_result["status"] == "error":
         raise HTTPException(status_code=400, detail=transcription_result["message"])
     
     transcribed_text = transcription_result["transcription"]
     language_code = transcription_result["language"]
-    
-    # Step 2: Recognize Intent
     intent = recognize_intent(transcribed_text, language_code)
     
-    # --- NEW DEBUGGING PRINTS ---
-    print(f">>> Intent recognized as: '{intent}'")
-    print(">>> Entering delegation logic...")
-    # --- END OF DEBUGGING PRINTS ---
-
     agent_response = None
     if intent == "Market_Analysis":
-        print(">>> Delegating to Market Guru...") # <<< DEBUG PRINT
         agent_response = get_market_price(transcribed_text)
     elif intent == "Scheme_Information":
-        print(">>> Delegating to Policy Advisor...") # <<< DEBUG PRINT
         agent_response = get_scheme_information(transcribed_text)
     elif intent == "Weather_Forecast":
-        print(">>> Delegating to Sky Watcher...") # <<< DEBUG PRINT
         agent_response = get_weather_forecast(transcribed_text)
     elif intent == "Crop_Health_Diagnosis":
-        print(">>> Responding with placeholder for Crop Health.") # <<< DEBUG PRINT
-        agent_response = {"status": "info", "message": "Crop health agent is not yet implemented for voice. Please use the /diagnose_disease endpoint to upload an image."}
+        agent_response = {"status": "info", "message": "Please use the 'Crop Disease Diagnosis' section to upload an image."}
     else:
-        print(">>> Intent was Unknown or unhandled.") # <<< DEBUG PRINT
         agent_response = {"status": "info", "message": "Could not determine a specific action for your request."}
-    
-    print("--- Request Processing Complete ---") # <<< DEBUG PRINT
+
     return {
         "status": "success",
         "transcription": transcribed_text,
@@ -88,15 +69,13 @@ def handle_listen_and_understand(request: ListenRequest):
 
 @app.post("/diagnose_disease")
 async def handle_diagnose_disease(image: UploadFile = File(...)):
-    """
-    Accepts an image upload and passes it to the Digital Pathologist agent.
-    (This function is unchanged)
-    """
     if not image.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File uploaded is not an image.")
         
+    image_bytes = await image.read()
+    
     diagnosis_result = diagnose_crop_health(
         image_file_name=image.filename,
-        image_content_type=image.content_type
+        image_bytes=image_bytes
     )
     return diagnosis_result
