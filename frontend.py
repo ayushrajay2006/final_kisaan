@@ -1,6 +1,6 @@
 # frontend.py
-# FINAL VERSION: This UI includes both a manual text input for location
-# and a button to automatically fetch the user's GPS location.
+# FINAL IMPROVED VERSION: This version combines the manual and automatic location
+# features into a single, intelligent "Ask a Question" button for a streamlined user experience.
 
 import streamlit as st
 import requests
@@ -19,7 +19,7 @@ st.set_page_config(
 st.title("🧑‍🌾 AI Farmer Assistant")
 st.markdown("Your personal AI-powered guide for modern farming.")
 
-# --- Helper Function to display agent responses ---
+# --- Helper Function to display agent responses (Unchanged) ---
 def display_agent_response(response_data):
     if not response_data or response_data.get("status") != "success":
         st.error(response_data.get("message", "An unknown error occurred."))
@@ -58,58 +58,54 @@ def display_agent_response(response_data):
     else:
         st.json(response_data)
 
+def ask_question(location):
+    """Helper function to call the backend and display results."""
+    with st.spinner("Listening... Please speak into your microphone."):
+        try:
+            payload = {"language_code": "en-IN", "location": location}
+            response = requests.post(f"{BACKEND_URL}/listen_and_understand", json=payload)
+            response.raise_for_status()
+            result = response.json()
+            st.session_state['intent'] = result.get("intent")
+            st.success("Heard you!")
+            st.markdown(f"> *“{result.get('transcription')}”*")
+            display_agent_response(result.get("agent_response"))
+        except Exception as e:
+            st.error(f"An error occurred: {e}")
 
 # --- Main Application Sections ---
 st.header("🗣️ Voice Assistant")
+st.markdown("Enter your location, or allow the browser to use your current position.")
 
-# --- Location Input with Both Manual and Automatic Detection ---
-st.markdown("First, enter your location manually OR use the button to get it automatically.")
-
-if 'location' not in st.session_state:
-    st.session_state['location'] = "Mumbai"
-
+# --- UPGRADED: Combined and Streamlined Location Input ---
+# This invisible component is always running, ready to provide location data.
 location_data = streamlit_geolocation()
 
-col1, col2 = st.columns([3, 1])
-with col1:
-    location_input = st.text_input("Enter your location (e.g., city or lat,lon):", st.session_state['location'], key="location_input_key")
-    st.session_state['location'] = location_input
-with col2:
-    st.markdown("</br>", unsafe_allow_html=True)
-    if st.button("📍 Get Current Location"):
-        if location_data and location_data.get('latitude') and location_data.get('longitude'):
-            st.session_state['location'] = f"{location_data['latitude']},{location_data['longitude']}"
-            st.experimental_rerun()
-        else:
-            st.warning("Could not get location. Please ensure you have granted permission in your browser.")
+# A single text input for the user's location
+manual_location = st.text_input("Enter your location (e.g., city, district):", "Mumbai")
 
-st.write("Now, click the button and speak your question.")
+# A single, smart "Ask" button
 if st.button("🎤 Ask a Question"):
-    if not st.session_state['location']:
-        st.warning("Please enter a location before asking a question.")
+    final_location = ""
+    # Prioritize automatic location if it's available and valid
+    if location_data and location_data.get('latitude'):
+        auto_location = f"{location_data['latitude']},{location_data['longitude']}"
+        st.info(f"📍 Using your current GPS location for the most accurate forecast.")
+        final_location = auto_location
+    # Otherwise, use the text from the manual input box
+    elif manual_location:
+        final_location = manual_location
+    
+    # Check if we have a location to use before making the call
+    if final_location:
+        ask_question(final_location)
     else:
-        with st.spinner("Listening... Please speak into your microphone."):
-            try:
-                payload = {
-                    "language_code": "en-IN",
-                    "location": st.session_state['location']
-                }
-                response = requests.post(f"{BACKEND_URL}/listen_and_understand", json=payload)
-                response.raise_for_status()
-                result = response.json()
-                st.session_state['intent'] = result.get("intent")
-                st.success("Heard you!")
-                st.markdown(f"> *“{result.get('transcription')}”*")
-                display_agent_response(result.get("agent_response"))
-            except requests.exceptions.HTTPError as e:
-                st.error(f"An HTTP error occurred: {e.response.status_code} {e.response.reason}")
-                st.error(f"Details: {e.response.text}")
-            except Exception as e:
-                st.error(f"An error occurred: {e}")
+        st.warning("Please enter a location or allow location access in your browser.")
+# --- END UPGRADE ---
 
 st.divider()
 
-# --- Crop Diagnosis Section ---
+# --- Crop Diagnosis Section (Unchanged) ---
 st.header("🌿 Crop Disease Diagnosis")
 st.write("Upload an image of a crop leaf to check for diseases.")
 uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
