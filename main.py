@@ -24,12 +24,12 @@ except (ImportError, OSError):
 app = FastAPI(
     title="AI Farmer Assistant API",
     description="An AI-powered assistant to help farmers with pricing, crop diseases, and government schemes.",
-    version="1.3.0", # Version bump for location feature
+    version="1.4.0", # Version bump for live model
 )
 
 class ListenRequest(BaseModel):
     language_code: str = "en-IN"
-    location: Optional[str] = None # Location is now an optional field
+    location: Optional[str] = None
 
 @app.get("/")
 def read_root():

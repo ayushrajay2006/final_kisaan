@@ -8,6 +8,7 @@ dependencies = [
     "fastapi[all]>=0.116.1",
     "google-cloud-speech>=2.33.0",
     "google-cloud-texttospeech>=2.27.0",
+    "pillow>=11.3.0",
     "pyaudio>=0.2.14",
     "pydub>=0.25.1",
     "requests>=2.32.4",
