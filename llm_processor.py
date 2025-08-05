@@ -1,6 +1,6 @@
 # llm_processor.py
-# FINAL VERSION: This is the central brain of the application, featuring the
-# powerful and empathetic system prompt to generate expert, yet simple, advice.
+# CONVERSATIONAL VERSION: This is the new central brain. It uses an advanced prompt
+# that understands chat history to hold a real conversation.
 
 import logging
 import requests
@@ -8,72 +8,62 @@ import json
 
 # --- Configuration ---
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent"
-# The API key is an empty string because it will be provided by the execution environment.
-# This is the correct and final implementation.
 API_KEY = "AIzaSyBb1SHvN8frWKXEfOZupKa27bIs0akT2gU" 
 
-def generate_response(original_question: str, agent_data: dict, intent: str):
+def generate_conversational_response(question: str, intent: str, chat_history: list, retrieved_data: dict):
     """
-    Takes raw data from a specialist agent and generates a natural language response using an LLM.
+    Generates a conversational response using the LLM, considering the chat history and retrieved data.
     """
-    
-    # --- The Powerful System Prompt ---
-    prompt = f"""
-    **Your Persona:** You are an incredibly experienced and respected agricultural specialist who has worked directly with farmers in the fields of India for over 30 years. You are known for your deep knowledge and, more importantly, for your ability to explain complex topics in a simple, practical, and encouraging way. You are like a trusted guide and friend.
 
-    **Your Task:** A farmer has asked a question. Your specialist tools have provided you with the raw technical data below. Your job is to synthesize this data into a genuinely helpful, easy-to-understand response that directly answers the farmer's question.
+    # --- NEW CONVERSATIONAL SYSTEM PROMPT ---
+    prompt = f"""
+    **Your Persona:** You are an incredibly experienced and respected agricultural specialist who has worked with Indian farmers for over 30 years. You are a patient, empathetic guide who explains complex topics in simple, practical terms.
+
+    **Your Task:** You are having a conversation with a farmer. You must provide a helpful and accurate response to their latest question, using the conversation history for context and the provided technical data for facts.
 
     **Rules for Your Response:**
-    1.  **Speak Simply and Clearly:** Do not use technical jargon. If you must use a term like "crop lodging," immediately explain what it means in a simple way (e.g., "when strong winds push the crops over").
-    2.  **Be Action-Oriented:** Don't just report the data. Tell the farmer what it *means* for them and what they should *do* about it. Give clear, step-by-step advice.
-    3.  **Be Empathetic and Encouraging:** Use a positive and supportive tone. Acknowledge the farmer's hard work. Start your response with a friendly greeting like "Namaste," or "Here is the information you asked for,".
-    4.  **Focus on the "Why":** Briefly explain *why* you are giving a piece of advice. For example, instead of just "Avoid spraying," say "It's best to avoid spraying before the rain, so the product doesn't wash away, which would waste your time and money."
-    5.  **Be Concise:** Get straight to the most important points. Use bullet points or numbered lists to make the advice easy to read.
+    1.  **Be Conversational:** Acknowledge the flow of the conversation. If the farmer asks a follow-up question, use phrases like "Certainly, regarding that scheme..." or "To give you more details on that...".
+    2.  **Use the Chat History:** The history is crucial for understanding context. If the farmer says "tell me more about the first one," you must look at the previous message in the history to know what "the first one" is.
+    3.  **Ground Your Answers in Data:** If you are provided with "Technical Data," your answer MUST be based on that data. Do not make up information. If the data is not sufficient to answer, say "I couldn't find specific details on that in my knowledge base, but here is what I do know...". If no data is provided, answer the question to the best of your general knowledge.
+    4.  **Speak Simply and Clearly:** No jargon. Explain things in a way a farmer can immediately understand and act upon.
+    5.  **Be Action-Oriented and Empathetic:** Give clear advice and maintain a supportive tone.
 
     ---
-    **Farmer's Original Question:** "{original_question}"
-    ---
-    **Raw Technical Data from Specialist Agent:**
+    **Conversation History (for context):**
     ```json
-    {json.dumps(agent_data, indent=2)}
+    {json.dumps(chat_history, indent=2)}
+    ```
+    ---
+    **Farmer's Latest Question:** "{question}"
+    ---
+    **Technical Data Retrieved by Specialist Tools (use this for your answer):**
+    ```json
+    {json.dumps(retrieved_data, indent=2) if retrieved_data else "No specific data was retrieved for this query."}
     ```
     ---
 
-    Now, based on all of the above, please craft the perfect response for the farmer.
+    Now, based on all of the above, please craft the perfect, conversational response to the farmer's latest question.
     """
-    # --- End of Prompt ---
+    # --- END OF NEW PROMPT ---
 
-    # Prepare the payload for the Gemini API
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}]
-    }
-    
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
     headers = {'Content-Type': 'application/json'}
     full_api_url = f"{GEMINI_API_URL}?key={API_KEY}"
 
-    # Make the API call
     try:
-        logging.info("Sending data to LLM for synthesis...")
-        response = requests.post(full_api_url, headers=headers, json=payload, timeout=30)
+        logging.info("Sending data to LLM for conversational synthesis...")
+        response = requests.post(full_api_url, headers=headers, json=payload, timeout=45)
         response.raise_for_status()
-        
         result = response.json()
         
-        # Extract the generated text from the response
-        if (result.get('candidates') and 
-            result['candidates'][0].get('content') and 
-            result['candidates'][0]['content'].get('parts')):
-            
+        if (result.get('candidates') and result['candidates'][0].get('content')):
             llm_response = result['candidates'][0]['content']['parts'][0]['text']
             logging.info("LLM synthesis successful.")
             return llm_response
         else:
             logging.error(f"Unexpected LLM response format: {result}")
-            return "Sorry, I received an unusual response from my AI brain. Please try again."
+            return "Sorry, I received an unusual response from my AI brain."
 
-    except requests.exceptions.RequestException as e:
-        logging.error(f"LLM API request failed: {e}")
-        return "Sorry, I'm having trouble connecting to my AI brain right now. Please check the connection."
     except Exception as e:
         logging.error(f"An unexpected error occurred during LLM synthesis: {e}")
         return "An unexpected error occurred while generating the response."

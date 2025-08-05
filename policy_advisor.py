@@ -1,59 +1,64 @@
 # policy_advisor.py
-# This agent provides information about government schemes and subsidies.
+# CONVERSATIONAL VERSION: This agent now acts as a pure "tool". Its only job is to
+# search the knowledge base and return the most relevant documents.
 
 import logging
+import faiss
+from sentence_transformers import SentenceTransformer
+import numpy as np
+import pickle
+import os
 
-# This mock database simulates a real database of government schemes.
-# The keys are keywords that we will search for in the user's query.
-MOCK_SCHEME_DATABASE = {
-    "drip irrigation": {
-        "scheme_name": "Pradhan Mantri Krishi Sinchayee Yojana (PMKSY)",
-        "summary": "This scheme aims to improve water use efficiency through micro-irrigation (drip and sprinkler). Farmers receive a subsidy on the cost of installing the system.",
-        "eligibility": "All categories of farmers are eligible. Preference may be given to small and marginal farmers.",
-        "documents_needed": "Aadhar card, land ownership documents (Pattadar Passbook/RoR), quote from an approved vendor, passport size photo.",
-        "how_to_apply": "Contact your local district horticulture or agriculture office."
-    },
-    "pm kisan": {
-        "scheme_name": "PM-Kisan Samman Nidhi",
-        "summary": "An income support scheme where eligible farmer families receive ₹6,000 per year in three equal installments.",
-        "eligibility": "All landholding farmer families are eligible, subject to certain exclusion criteria (e.g., high-income earners, institutional landholders).",
-        "documents_needed": "Aadhar card, landholding papers, bank account details.",
-        "how_to_apply": "Register through the official PM-KISAN portal or at your nearest Common Service Centre (CSC)."
-    },
-    "crop insurance": {
-        "scheme_name": "Pradhan Mantri Fasal Bima Yojana (PMFBY)",
-        "summary": "Provides comprehensive insurance coverage against crop failure, helping to stabilize the income of farmers.",
-        "eligibility": "All farmers who have taken loans (loanee farmers) are automatically enrolled. Non-loanee farmers can enroll voluntarily.",
-        "documents_needed": "Land records, bank passbook, Aadhar card, and crop sowing certificate.",
-        "how_to_apply": "Through your bank, a registered insurance company, or the National Crop Insurance Portal."
-    }
-}
+# --- Configuration ---
+INDEX_FILE = "index.faiss"
+CHUNKS_FILE = "chunks.pkl"
 
-def get_scheme_information(text: str):
+# --- Load the Knowledge Base into Memory on Startup ---
+knowledge_base = None
+model = None
+try:
+    if os.path.exists(INDEX_FILE) and os.path.exists(CHUNKS_FILE):
+        logging.info("Loading pre-built knowledge base...")
+        index = faiss.read_index(INDEX_FILE)
+        with open(CHUNKS_FILE, "rb") as f:
+            chunks = pickle.load(f)
+        knowledge_base = {"index": index, "chunks": chunks}
+        model = SentenceTransformer('all-MiniLM-L6-v2')
+        logging.info("Knowledge base loaded successfully.")
+    else:
+        logging.error("Knowledge base files not found!")
+except Exception as e:
+    logging.error(f"Failed to load knowledge base on startup. Error: {e}")
+
+
+def get_scheme_information(question: str, chat_history: list):
     """
-    Analyzes text to find keywords related to government schemes and returns information.
-
-    Args:
-        text (str): The transcribed text from the user.
-
-    Returns:
-        dict: A dictionary containing the scheme details, or an error message.
+    Acts as a tool to retrieve relevant scheme information from the knowledge base.
     """
-    text_lower = text.lower()
+    if not knowledge_base or not model:
+        return None # Return None if the KB isn't loaded
 
-    # Simple entity extraction: find which scheme the user is asking about.
-    for keyword, scheme_info in MOCK_SCHEME_DATABASE.items():
-        if keyword in text_lower:
-            logging.info(f"Policy Advisor found keyword: {keyword}")
-            return {
-                "status": "success",
-                "data": scheme_info
-            }
-    
-    logging.warning(f"Policy Advisor could not find a known scheme in text: '{text}'")
-    return {
-        "status": "error",
-        "message": "Sorry, I could not find information on the scheme you mentioned. Please try asking in a different way."
-    }
+    try:
+        # For follow-up questions, the context is in the history. For new questions, it's in the question itself.
+        # A more advanced implementation could summarize the history, but for now, we'll focus on the latest question.
+        search_query = question
+        
+        logging.info(f"Searching knowledge base for: '{search_query}'")
+        question_embedding = model.encode([search_query])
+        
+        # Search the index for the 3 most similar chunks
+        D, I = index.search(np.array(question_embedding, dtype=np.float32), k=3)
+        
+        retrieved_chunks = [knowledge_base["chunks"][i] for i in I[0]]
+        context = "\n\n---\n\n".join(retrieved_chunks)
+        
+        logging.info("Retrieved relevant context from knowledge base.")
+        
+        # Return the raw context. The LLM processor will handle the generation.
+        return {
+            "retrieved_information_from_government_sources": context
+        }
 
-
+    except Exception as e:
+        logging.error(f"Error during RAG retrieval: {e}")
+        return None

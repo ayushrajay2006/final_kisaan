@@ -1,6 +1,6 @@
 # frontend.py
-# FINAL VERSION: This UI is simplified to display the natural language responses
-# from the LLM brain and includes the intuitive, combined location feature.
+# FINAL CONVERSATIONAL VERSION: This UI now supports both text input via the
+# chat box and voice input via a dedicated "Speak" button.
 
 import streamlit as st
 import requests
@@ -14,55 +14,86 @@ st.set_page_config(page_title="AI Farmer Assistant", page_icon="🧑‍🌾", la
 st.title("🧑‍🌾 AI Farmer Assistant")
 st.markdown("Your personal AI-powered guide for modern farming.")
 
-def ask_question(location):
-    """Helper function to call the backend and display the LLM's response."""
-    with st.spinner("Listening... then thinking..."):
+# --- Initialize Session State for Chat ---
+if "messages" not in st.session_state:
+    st.session_state.messages = [{"role": "assistant", "content": "Namaste! How can I help you today? You can type your question below or use the 'Speak' button."}]
+
+# --- Location Component ---
+st.sidebar.header("📍 Your Location")
+st.sidebar.markdown("For accurate weather forecasts, please provide your location.")
+location_data = streamlit_geolocation()
+manual_location = st.sidebar.text_input("Enter City or Lat,Lon", "Mumbai")
+final_location = manual_location
+if location_data and location_data.get('latitude'):
+    final_location = f"{location_data['latitude']},{location_data['longitude']}"
+    st.sidebar.success(f"Using GPS Location: {final_location}")
+
+# --- Helper function to process and display a question ---
+def process_and_display_question(question_text):
+    # Add user's message to chat history and display it
+    st.session_state.messages.append({"role": "user", "content": question_text})
+    with st.chat_message("user"):
+        st.markdown(question_text)
+
+    # Call the backend with the new question and the entire chat history
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            try:
+                payload = {
+                    "location": final_location,
+                    "question": question_text,
+                    "chat_history": st.session_state.messages[:-1]
+                }
+                response = requests.post(f"{BACKEND_URL}/chat", json=payload)
+                response.raise_for_status()
+                result = response.json()
+                
+                full_response = result.get("agent_response")
+                st.markdown(full_response)
+                
+                # Add AI's response to chat history
+                st.session_state.messages.append({"role": "assistant", "content": full_response})
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
+
+# --- Main Chat Interface ---
+st.header("💬 Chat with your Assistant")
+
+# Display existing chat messages
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# --- Combined Voice and Text Input ---
+# The text input for typing
+if prompt := st.chat_input("Type your question here..."):
+    process_and_display_question(prompt)
+
+# The button for speaking
+if st.button("🎤 Speak your question"):
+    with st.spinner("Listening..."):
         try:
-            payload = {"language_code": "en-IN", "location": location}
-            response = requests.post(f"{BACKEND_URL}/listen_and_understand", json=payload)
+            # Call the new /transcribe endpoint
+            response = requests.post(f"{BACKEND_URL}/transcribe")
             response.raise_for_status()
             result = response.json()
+            transcribed_text = result.get("transcription")
             
-            st.success("Heard you!")
-            st.markdown(f"> *“{result.get('transcription')}”*")
-            st.divider()
-            
-            # Display the natural language response from the LLM
-            st.markdown(result.get("agent_response"))
-
+            if transcribed_text:
+                # If transcription is successful, process it like typed text
+                process_and_display_question(transcribed_text)
+            else:
+                st.warning("Could not understand audio. Please try again.")
         except Exception as e:
-            st.error(f"An error occurred: {e}")
+            st.error(f"An error occurred with voice input: {e}")
 
-# --- Main Application Sections ---
-st.header("🗣️ Voice Assistant")
-st.markdown("Enter your location, or allow the browser to use your current position.")
 
-# --- Combined and Streamlined Location Input ---
-location_data = streamlit_geolocation()
-manual_location = st.text_input("Enter your location (e.g., city, district):", "Mumbai")
-
-if st.button("🎤 Ask a Question"):
-    final_location = ""
-    if location_data and location_data.get('latitude'):
-        auto_location = f"{location_data['latitude']},{location_data['longitude']}"
-        st.info(f"📍 Using your current GPS location for the most accurate forecast.")
-        final_location = auto_location
-    elif manual_location:
-        final_location = manual_location
-    
-    if final_location:
-        ask_question(final_location)
-    else:
-        st.warning("Please enter a location or allow location access in your browser.")
-
-st.divider()
-
-# --- Crop Diagnosis Section (Unchanged) ---
-st.header("🌿 Crop Disease Diagnosis")
-st.write("Upload an image of a crop leaf to check for diseases.")
-uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
+# --- Crop Diagnosis Section (Sidebar) ---
+st.sidebar.divider()
+st.sidebar.header("🌿 Crop Disease Diagnosis")
+uploaded_file = st.sidebar.file_uploader("Upload an image...", type=["jpg", "jpeg", "png"])
 if uploaded_file is not None:
-    st.image(uploaded_file, caption="Uploaded Image.", use_column_width=True)
+    st.sidebar.image(uploaded_file, caption="Uploaded Image.")
     with st.spinner("Analyzing image..."):
         try:
             files = {"image": (uploaded_file.name, uploaded_file, uploaded_file.type)}
@@ -71,10 +102,10 @@ if uploaded_file is not None:
             result = response.json()
             if result.get("status") == "success":
                 data = result.get("data", {})
-                st.subheader(f"Diagnosis: {data.get('disease_name')}")
-                st.warning(f"**Confidence:** {data.get('confidence_score', 0)*100:.2f}%")
-                st.info(f"**Recommendation:** {data.get('recommendation')}")
+                st.sidebar.subheader(f"Diagnosis: {data.get('disease_name')}")
+                st.sidebar.warning(f"**Confidence:** {data.get('confidence_score', 0)*100:.2f}%")
+                st.sidebar.info(f"**Recommendation:** {data.get('recommendation')}")
             else:
-                st.error(result.get("message", "Failed to get a diagnosis."))
+                st.sidebar.error(result.get("message", "Failed to get a diagnosis."))
         except Exception as e:
-            st.error(f"An error occurred during diagnosis: {e}")
+            st.sidebar.error(f"An error occurred: {e}")
