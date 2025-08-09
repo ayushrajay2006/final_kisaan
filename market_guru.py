@@ -1,43 +1,117 @@
 # market_guru.py
-# REVERTED TO STABLE MOCK DATA
-# The live government API is currently unreliable. We are reverting to our
-# simulated database to ensure the application remains stable and functional
-# while we explore alternative data sources.
+# FINAL INTELLIGENT VERSION: This agent now uses reverse geocoding to determine
+# the user's district and state from their GPS coordinates, enabling hyper-local searches.
 
 import logging
+import requests
+from datetime import datetime
+import os
+import json
 
-# We are back to using our reliable, simulated database.
-MOCK_PRICE_DATABASE = {
-    "tomato": {"price": 2100, "unit": "quintal", "market": "Rythu Bazar, Mehdipatnam"},
-    "cotton": {"price": 7500, "unit": "quintal", "market": "Adilabad Market Yard"},
-    "chilli": {"price": 15000, "unit": "quintal", "market": "Guntur Mirchi Yard"},
-    "turmeric": {"price": 8200, "unit": "quintal", "market": "Nizamabad Market"},
-    "wheat": {"price": 2250, "unit": "quintal", "market": "Karimnagar Market"},
-    # --- Mapped to Telugu ---
-    "టమోటా": {"price": 2100, "unit": "quintal", "market": "రైతు బజార్, మెహదీపట్నం"},
-    "పత్తి": {"price": 7500, "unit": "quintal", "market": "ఆదిలాబాద్ మార్కెట్ యార్డ్"},
-}
+# --- Configuration ---
+API_URL = "https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070"
+API_KEY = "579b464db66ec23bdd000001be37f38ca138469857bae7614b111000"
+# We will use a free reverse geocoding API
+REVERSE_GEOCODING_API_URL = "https://api.bigdatacloud.net/data/reverse-geocode-client"
 
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent"
+GEMINI_API_KEY = "AIzaSyBb1SHvN8frWKXEfOZupKa27bIs0akT2gU" 
 
-def get_market_price(text: str):
+def get_location_from_coords(lat, lon):
     """
-    Analyzes the text to find a crop and returns its market price from the mock database.
+    Uses a reverse geocoding API to find the district and state from coordinates.
     """
-    text_lower = text.lower()
+    params = {"latitude": lat, "longitude": lon, "localityLanguage": "en"}
+    try:
+        logging.info(f"Performing reverse geocoding for lat:{lat}, lon:{lon}")
+        response = requests.get(REVERSE_GEOCODING_API_URL, params=params)
+        response.raise_for_status()
+        data = response.json()
+        # The API provides various administrative levels, we'll look for district and state
+        district = data.get("locality") or data.get("city")
+        state = data.get("principalSubdivision")
+        logging.info(f"Reverse geocoding successful: District='{district}', State='{state}'")
+        return district, state
+    except Exception as e:
+        logging.error(f"Reverse geocoding failed: {e}")
+        return None, None
+
+def extract_commodity_with_llm(text: str):
+    """Uses the LLM to extract only the crop name from the user's question."""
+    prompt = f"From the following text, extract only the name of the agricultural commodity. Respond with ONLY the name of the commodity in English, capitalized. Text: \"{text}\""
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    headers = {'Content-Type': 'application/json'}
+    full_api_url = f"{GEMINI_API_URL}?key={GEMINI_API_KEY}"
+    try:
+        response = requests.post(full_api_url, headers=headers, json=payload, timeout=15)
+        response.raise_for_status()
+        result = response.json()
+        if (result.get('candidates') and result['candidates'][0].get('content')):
+            return result['candidates'][0]['content']['parts'][0]['text'].strip()
+        return None
+    except Exception:
+        return None
+
+def get_market_price(text: str, location: str):
+    """
+    Performs a tiered search for market prices using the user's location.
+    """
+    commodity = extract_commodity_with_llm(text)
+    if not commodity:
+        return {"status": "error", "message": "I'm sorry, I couldn't understand which crop you're asking about."}
+
+    district, state = None, None
+    # Check if the location is coordinates or a name
+    if ',' in location:
+        try:
+            lat, lon = location.split(',')
+            district, state = get_location_from_coords(lat, lon)
+        except ValueError:
+            # It's likely a city name, use it directly
+            district = location
+    else:
+        district = location
+
+    # --- Tiered Search Logic ---
+    records = []
+    search_scope = ""
     
-    # Simple entity extraction: find which crop the user is asking about.
-    for crop in MOCK_PRICE_DATABASE.keys():
-        if crop in text_lower:
-            logging.info(f"Market Guru found crop: {crop}")
-            price_info = MOCK_PRICE_DATABASE[crop]
-            price_info["crop"] = crop 
-            return {
-                "status": "success",
-                "data": price_info
-            }
+    # Tier 1: Search by District if available
+    if district:
+        search_scope = f"district: {district}"
+        params = {"api-key": API_KEY, "format": "json", "limit": 100, "filters[commodity]": commodity, "filters[district]": district}
+        try:
+            response = requests.get(API_URL, params=params, timeout=20)
+            response.raise_for_status()
+            records = response.json().get("records", [])
+        except Exception: records = []
+
+    # Tier 2: Search by State if Tier 1 failed and state is known
+    if not records and state:
+        search_scope = f"state: {state}"
+        params = {"api-key": API_KEY, "format": "json", "limit": 100, "filters[commodity]": commodity, "filters[state]": state}
+        try:
+            response = requests.get(API_URL, params=params, timeout=20)
+            response.raise_for_status()
+            records = response.json().get("records", [])
+        except Exception: records = []
+
+    # Tier 3: Nationwide search as a final fallback
+    if not records:
+        search_scope = "nationwide"
+        params = {"api-key": API_KEY, "format": "json", "limit": 100, "filters[commodity]": commodity}
+        try:
+            response = requests.get(API_URL, params=params, timeout=20)
+            response.raise_for_status()
+            records = response.json().get("records", [])
+        except Exception: records = []
             
-    logging.warning(f"Market Guru could not find a known crop in text: '{text}'")
-    return {
-        "status": "error",
-        "message": "Sorry, I could not identify the crop you are asking about. Please try again."
-    }
+    if not records:
+        return {"status": "error", "message": f"Sorry, I couldn't find any recent price data for {commodity}."}
+
+    records.sort(key=lambda r: datetime.strptime(r["arrival_date"], "%d/%m/%Y"), reverse=True)
+    
+    top_results = [{"market": r.get("market"), "district": r.get("district"), "state": r.get("state"), "modal_price": f"₹{r.get('modal_price')} per quintal", "date": r.get("arrival_date")} for r in records[:5]]
+    
+    final_data = {"query": {"commodity": commodity, "location": location}, "search_scope": search_scope, "results": top_results}
+    return {"status": "success", "data": final_data}
