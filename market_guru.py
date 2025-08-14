@@ -27,7 +27,6 @@ def get_location_from_coords(lat, lon):
         response = requests.get(REVERSE_GEOCODING_API_URL, params=params)
         response.raise_for_status()
         data = response.json()
-        # The API provides various administrative levels, we'll look for district and state
         district = data.get("locality") or data.get("city")
         state = data.get("principalSubdivision")
         logging.info(f"Reverse geocoding successful: District='{district}', State='{state}'")
@@ -38,7 +37,7 @@ def get_location_from_coords(lat, lon):
 
 def extract_commodity_with_llm(text: str):
     """Uses the LLM to extract only the crop name from the user's question."""
-    prompt = f"From the following text, extract only the name of the agricultural commodity. Respond with ONLY the name of the commodity in English, capitalized. Text: \"{text}\""
+    prompt = f"From the following text, extract only the name of the agricultural commodity. Respond with ONLY the singular, capitalized English name of the commodity (e.g., 'Tomato', 'Potato'). Text: \"{text}\""
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     headers = {'Content-Type': 'application/json'}
     full_api_url = f"{GEMINI_API_URL}?key={GEMINI_API_KEY}"
@@ -61,22 +60,21 @@ def get_market_price(text: str, location: str):
         return {"status": "error", "message": "I'm sorry, I couldn't understand which crop you're asking about."}
 
     district, state = None, None
-    # Check if the location is coordinates or a name
     if ',' in location:
         try:
             lat, lon = location.split(',')
             district, state = get_location_from_coords(lat, lon)
         except ValueError:
-            # It's likely a city name, use it directly
             district = location
     else:
+        # If it's a city name, we can use an LLM to find the state/district
+        # For simplicity now, we'll treat it as a district and let the tiered search handle it.
         district = location
 
-    # --- Tiered Search Logic ---
     records = []
     search_scope = ""
     
-    # Tier 1: Search by District if available
+    # Tier 1: Search by District
     if district:
         search_scope = f"district: {district}"
         params = {"api-key": API_KEY, "format": "json", "limit": 100, "filters[commodity]": commodity, "filters[district]": district}
@@ -86,7 +84,7 @@ def get_market_price(text: str, location: str):
             records = response.json().get("records", [])
         except Exception: records = []
 
-    # Tier 2: Search by State if Tier 1 failed and state is known
+    # Tier 2: Search by State
     if not records and state:
         search_scope = f"state: {state}"
         params = {"api-key": API_KEY, "format": "json", "limit": 100, "filters[commodity]": commodity, "filters[state]": state}
@@ -96,7 +94,7 @@ def get_market_price(text: str, location: str):
             records = response.json().get("records", [])
         except Exception: records = []
 
-    # Tier 3: Nationwide search as a final fallback
+    # Tier 3: Nationwide search
     if not records:
         search_scope = "nationwide"
         params = {"api-key": API_KEY, "format": "json", "limit": 100, "filters[commodity]": commodity}

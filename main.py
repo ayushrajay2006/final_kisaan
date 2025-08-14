@@ -1,13 +1,10 @@
 # main.py
-# FINAL AGENTIC VERSION (ROBUST): This server now intelligently parses the
-# LLM's response to reliably detect and handle tool-use requests for all intents.
+# FINAL SYNCHRONIZED VERSION: This server uses the simpler, direct-data-fetch
+# architecture that you preferred.
 
 from fastapi import FastAPI, HTTPException, File, UploadFile
 from pydantic import BaseModel
 from typing import Optional, List, Dict
-import json
-import re 
-import logging
 
 # Import functions from all our agents
 from orchestrator import recognize_intent, listen_and_transcribe
@@ -20,7 +17,7 @@ from llm_processor import generate_conversational_response
 app = FastAPI(
     title="AI Farmer Assistant API",
     description="A conversational AI assistant for farmers.",
-    version="3.4.0", # Version bump for Reverse Geocoding
+    version="3.6.0", # Version bump for architecture revert
 )
 
 class ChatRequest(BaseModel):
@@ -43,14 +40,12 @@ def handle_chat(request: ChatRequest):
     agent_data = None
     agent_response = None
     
-    # --- UPDATED: Market Guru now uses location ---
     if intent == "Market_Analysis":
         if not request.location:
             return {"agent_response": "To give you local market prices, I need a location. Please provide one."}
         agent_response = get_market_price(text=request.question, location=request.location)
         if agent_response.get("status") == "success":
             agent_data = agent_response['data']
-    # --- END UPDATE ---
     
     elif intent == "Scheme_Information":
         agent_data = get_scheme_information(request.question, request.chat_history)
